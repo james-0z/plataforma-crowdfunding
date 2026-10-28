@@ -5,7 +5,7 @@
 
     <div class="campaigns-grid">
       <CampaignCard
-        v-for="campana in todasLasCampanas"
+        v-for="campana in campaignStore.campaigns"
         :key="campana.id"
         :id="campana.id"
         :title="campana.titulo"
@@ -19,44 +19,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
 import CampaignCard from '@/components/common/CampaignCard.vue';
+import { useCampaignStore } from '@/stores/campaignStore';
 
-interface Campana {
-  id: number;
-  titulo: string;
-  descripcion: string;
-  montoRecaudado: number;
-  metaMonto: number;
-  estado: 'activa' | 'exitosa' | 'fallida';
-}
-
-const todasLasCampanas = ref<Campana[]>([
-  {
-    id: 1,
-    titulo: 'Videojuego Indie RPG 2D',
-    descripcion: 'Un juego de rol con arte píxel y banda sonora orquestal.',
-    montoRecaudado: 3500,
-    metaMonto: 5000,
-    estado: 'activa'
-  },
-  {
-    id: 2,
-    titulo: 'Teclado Mecánico Ergonómico',
-    descripcion: 'Diseño ultra compacto impreso en 3D con switches personalizados.',
-    montoRecaudado: 12000,
-    metaMonto: 10000,
-    estado: 'exitosa'
-  },
-  {
-    id: 3,
-    titulo: 'Documental Ecológico',
-    descripcion: 'Registro sobre la conservación de especies nativas en ríos locales.',
-    montoRecaudado: 800,
-    metaMonto: 4000,
-    estado: 'fallida'
-  }
-]);
+const campaignStore = useCampaignStore();
 </script>
 
 <style scoped>

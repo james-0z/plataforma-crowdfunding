@@ -7,7 +7,6 @@
     </header>
 
     <div class="detail-grid">
-      <!-- Columna Principal: Información de la Campaña -->
       <div class="main-info">
         <section class="section">
           <h3>Descripción del Proyecto</h3>
@@ -22,7 +21,6 @@
         </section>
       </div>
 
-      <!-- Columna Lateral: Estado de Recaudación y Formulario de Aporte -->
       <aside class="funding-sidebar">
         <div class="stats-card">
           <ProgressBar 
@@ -36,7 +34,6 @@
 
           <hr class="divider" />
 
-          <!-- Formulario de Aporte -->
           <form @submit.prevent="realizarAporte" class="contribution-form">
             <h4>Realizar un Aporte</h4>
             <div class="form-group">
@@ -65,61 +62,56 @@
       </aside>
     </div>
   </div>
+  <div v-else class="not-found">
+    <h2>Campaña no encontrada</h2>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import ProgressBar from '@/components/common/ProgressBar.vue';
-
-interface CampanaDetalle {
-  id: number;
-  titulo: string;
-  creador: string;
-  descripcion: string;
-  montoRecaudado: number;
-  metaMonto: number;
-  fechaLimite: string;
-  estado: 'activa' | 'exitosa' | 'fallida';
-}
+import { useCampaignStore, type Campaign } from '@/stores/campaignStore';
 
 const route = useRoute();
-const campaignId = Number(route.params.id) || 1;
+const campaignStore = useCampaignStore();
 
-// Datos de prueba (simulando respuesta de API)
-const campana = ref<CampanaDetalle>({
-  id: campaignId,
-  titulo: 'Videojuego Indie RPG 2D',
-  creador: 'Estudio PixelArt',
-  descripcion: 'Un emocionante juego de rol con estética retro de 16 bits, banda sonora orquestal grabada en vivo y más de 30 horas de juego. Buscamos financiar los costos de licencias de audio y distribución digital.',
-  montoRecaudado: 3500,
-  metaMonto: 5000,
-  fechaLimite: '2026-11-30',
-  estado: 'activa'
-});
-
+const campana = ref<Campaign | undefined>(undefined);
 const montoAporte = ref<number | null>(null);
 const mensajeExito = ref<string>('');
 
-const realizarAporte = () => {
-  if (!montoAporte.value || montoAporte.value <= 0) return;
+const cargarCampana = () => {
+  const id = Number(route.params.id);
+  campana.value = campaignStore.getCampaignById(id);
+};
 
-  // Actualización local reactiva para previsualización
-  campana.value.montoRecaudado += montoAporte.value;
-  
-  if (campana.value.montoRecaudado >= campana.value.metaMonto) {
-    campana.value.estado = 'exitosa';
+onMounted(() => {
+  cargarCampana();
+});
+
+// Reactividad ante cambios de ruta (cuando navegas de una campaña a otra)
+watch(
+  () => route.params.id,
+  () => {
+    cargarCampana();
   }
+);
 
-  mensajeExito.value = `¡Gracias por tu aporte de $${montoAporte.value.toLocaleString()}!`;
-  montoAporte.value = null;
+const realizarAporte = () => {
+  if (!montoAporte.value || montoAporte.value <= 0 || !campana.value) return;
 
-  setTimeout(() => {
-    mensajeExito.value = '';
-  }, 4000);
+  const exito = campaignStore.makeContribution(campana.value.id, montoAporte.value);
+
+  if (exito) {
+    mensajeExito.value = `¡Gracias por tu aporte de $${montoAporte.value.toLocaleString()}!`;
+    montoAporte.value = null;
+
+    setTimeout(() => {
+      mensajeExito.value = '';
+    }, 4000);
+  }
 };
 </script>
-
 <style scoped>
 .detail-container {
   display: flex;
