@@ -1,8 +1,7 @@
-import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { pool } from '../config/db.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro';
+import { ENV } from '../config/env.js'; // 👈 Usamos las variables de entorno centralizadas
+import { hashPassword, comparePassword } from '../utils/hash.js'; // 👈 Importamos las funciones de cifrado
 
 export interface UserInput {
   nombre: string;
@@ -20,9 +19,8 @@ export const authService = {
       throw new Error('El correo electrónico ya está registrado.');
     }
 
-    // 2. Hash de la contraseña
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    // 2. Hash de la contraseña usando nuestra utilidad centralizada
+    const passwordHash = await hashPassword(password);
 
     // 3. Insertar usuario en la base de datos
     const query = `
@@ -34,10 +32,10 @@ export const authService = {
     const result = await pool.query(query, values);
     const newUser = result.rows[0];
 
-    // 4. Generar Token JWT
+    // 4. Generar Token JWT usando ENV
     const token = jwt.sign(
       { id: newUser.id, email: newUser.email, rol: newUser.rol },
-      JWT_SECRET,
+      ENV.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
@@ -53,16 +51,16 @@ export const authService = {
 
     const user = result.rows[0];
 
-    // 2. Verificar contraseña
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    // 2. Verificar contraseña usando nuestra utilidad centralizada
+    const isValidPassword = await comparePassword(password, user.password_hash);
     if (!isValidPassword) {
       throw new Error('Credenciales inválidas.');
     }
 
-    // 3. Generar Token JWT
+    // 3. Generar Token JWT usando ENV
     const token = jwt.sign(
       { id: user.id, email: user.email, rol: user.rol },
-      JWT_SECRET,
+      ENV.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
