@@ -1,46 +1,49 @@
-import { type Request, type Response } from 'express';
-import { authService } from '../services/auth.service.js';
+import type { CookieOptions, Request, Response } from 'express';
+import { env, isProduction } from '../config/env.js';
+import { authService, type Session } from '../services/auth.service.js';
+
+const REFRESH_COOKIE = 'refresh_token';
+
+const cookieOptions: CookieOptions = {
+  httpOnly: true, // inaccesible desde JavaScript (mitiga XSS)
+  secure: isProduction, // solo HTTPS en producción
+  sameSite: 'lax',
+  path: '/api/auth', // el navegador solo la envía a los endpoints de auth
+};
+
+function sendSession(res: Response, session: Session, status = 200) {
+  res.cookie(REFRESH_COOKIE, session.refreshToken, {
+    ...cookieOptions,
+    maxAge: env.REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+  });
+  res.status(status).json({ user: session.user, accessToken: session.accessToken });
+}
 
 export const authController = {
-  async register(req: Request, res: Response): Promise<void> {
-    try {
-      const { nombre, email, password } = req.body;
-      
-      if (!nombre || !email || !password) {
-        res.status(400).json({ error: 'Todos los campos son obligatorios.' });
-        return;
-      }
+  async register(req: Request, res: Response) {
+    sendSession(res, await authService.register(req.body), 201);
+  },
 
-      const result = await authService.register({ nombre, email, password });
-      res.status(201).json({
-        message: 'Usuario registrado exitosamente',
-        ...result
-      });
+  async login(req: Request, res: Response) {
+    sendSession(res, await authService.login(req.body));
+  },
+
+  async refresh(req: Request, res: Response) {
+    try {
+      sendSession(res, await authService.refresh(req.cookies?.[REFRESH_COOKIE]));
     } catch (error) {
-      res.status(400).json({ 
-        error: error instanceof Error ? error.message : 'Error en el registro' 
-      });
+      res.clearCookie(REFRESH_COOKIE, cookieOptions);
+      throw error;
     }
   },
 
-  async login(req: Request, res: Response): Promise<void> {
-    try {
-      const { email, password } = req.body;
+  async logout(req: Request, res: Response) {
+    await authService.logout(req.cookies?.[REFRESH_COOKIE]);
+    res.clearCookie(REFRESH_COOKIE, cookieOptions);
+    res.status(204).end();
+  },
 
-      if (!email || !password) {
-        res.status(400).json({ error: 'Correo y contraseña son obligatorios.' });
-        return;
-      }
-
-      const result = await authService.login(email, password);
-      res.status(200).json({
-        message: 'Inicio de sesión exitoso',
-        ...result
-      });
-    } catch (error) {
-      res.status(401).json({ 
-        error: error instanceof Error ? error.message : 'Error en el inicio de sesión' 
-      });
-    }
-  }
+  async me(req: Request, res: Response) {
+    res.json({ user: await authService.me(req.user!.id) });
+  },
 };

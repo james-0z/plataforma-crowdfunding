@@ -1,14 +1,16 @@
+export type Role = 'user' | 'admin';
+
+/** Usuario tal como lo ve el cliente (nunca incluye el hash). */
 export interface User {
   id: number;
   nombre: string;
   email: string;
-  password_hash?: string;
-  rol: 'user' | 'admin';
-  creado_en?: Date;
+  rol: Role;
+  creadoEn: string;
 }
 
-export interface UserDTO {
-  nombre: string;
+export interface AuthUser {
+  id: number;
   email: string;
-  password?: string;
+  rol: Role;
 }

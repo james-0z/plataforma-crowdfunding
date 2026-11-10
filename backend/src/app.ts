@@ -1,61 +1,51 @@
-/*
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import cookieParser from 'cookie-parser';
+import cors from 'cors';
 import express, { type Application } from 'express';
-import cors from 'cors';
+import helmet from 'helmet';
+import { env } from './config/env.js';
+import { errorHandler, notFoundHandler } from './middlewares/errorHandler.middleware.js';
+import routes from './routes/index.js';
 
-const app: Application = express();
+// Carpeta con el frontend compilado (se crea al desplegar: backend/public).
+const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
-// Middlewares globales
-app.use(cors());
-app.use(express.json());
+export function createApp(): Application {
+  const app = express();
 
-// Ruta de comprobación de salud de la API
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'OK', message: 'API Crowdfunding All-or-Nothing operacional' });
-});
+  // Detrás del proxy de la nube: necesario para ver la IP real del cliente
+  // (límite de intentos de login) y para que las cookies seguras funcionen.
+  app.set('trust proxy', 1);
 
-export default app;
-*/
+  app.disable('x-powered-by');
+  app.use(helmet());
+  app.use(cors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
+  app.use(express.json({ limit: '100kb' }));
+  app.use(cookieParser());
 
-import express, { type Application, type Request, type Response } from 'express';
-import cors from 'cors';
-import { pool } from './config/db.js';
-import authRoutes from './routes/auth.route.js';
-import campaignRoutes from './routes/compaign.route.js';
-import contributionRoutes from './routes/contribution.route.js';
+  app.use('/api', routes);
+  app.use('/api', notFoundHandler); // una ruta /api desconocida responde JSON 404
 
-const app: Application = express();
-
-// Middlewares globales
-app.use(cors());
-app.use(express.json());
-
-// Rutas de la API
-app.use('/api/auth', authRoutes);
-app.use('/api/campaigns', campaignRoutes);
-app.use('/api/contributions', contributionRoutes);
-
-// Ruta de comprobación de salud de la API
-app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'OK', message: 'API Crowdfunding All-or-Nothing operacional' });
-});
-
-// Ruta de prueba de conexión a PostgreSQL
-app.get('/api/db-check', async (_req: Request, res: Response) => {
-  try {
-    const result = await pool.query('SELECT NOW() AS fecha_actual, current_database() AS base_datos;');
-    res.json({
-      status: 'Éxito',
-      mensaje: 'Conexión a PostgreSQL verificada correctamente',
-      data: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Error al conectar a PostgreSQL:', error);
-    res.status(500).json({
-      status: 'Error',
-      mensaje: 'No se pudo conectar a la base de datos PostgreSQL',
-      detalles: error instanceof Error ? error.message : String(error)
+  // Si existe el frontend compilado, el mismo servidor lo sirve.
+  if (existsSync(join(publicDir, 'index.html'))) {
+    app.use(
+      express.static(publicDir, {
+        index: false,
+        setHeaders: (res, path) => {
+          if (path.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+        },
+      }),
+    );
+    // Cualquier otra ruta (/campanas/3, /dashboard…) la resuelve Vue Router.
+    app.get('*', (_req, res) => {
+      res.sendFile(join(publicDir, 'index.html'));
     });
   }
-});
 
-export default app;
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}

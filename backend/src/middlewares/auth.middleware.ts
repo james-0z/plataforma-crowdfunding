@@ -1,31 +1,28 @@
-import { type Request, type Response, type NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import type { RequestHandler } from 'express';
+import { AppError } from '../errors/AppError.js';
+import type { Role } from '../models/user.model.js';
+import { verifyAccessToken } from '../utils/tokens.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro';
-
-export interface AuthenticatedRequest extends Request {
-  user?: {
-    id: number;
-    email: string;
-    rol: string;
-  };
-}
-
-export const verifyToken = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
-    return;
+export const authenticate: RequestHandler = (req, _res, next) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    return next(AppError.unauthorized('Token no proporcionado.'));
   }
-
-  const token = authHeader.split(' ')[1];
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; email: string; rol: string };
-    req.user = decoded;
+    const payload = verifyAccessToken(header.slice(7));
+    req.user = { id: payload.sub, email: payload.email, rol: payload.rol };
     next();
-  } catch (error) {
-    res.status(403).json({ error: 'Token inválido o expirado.' });
+  } catch {
+    // 401 (y no 403): el cliente debe renovar el token o volver a iniciar sesión.
+    next(AppError.unauthorized('Token inválido o expirado.'));
   }
 };
+
+/** RBAC: exige que el usuario autenticado tenga alguno de los roles indicados. */
+export const requireRole =
+  (...roles: Role[]): RequestHandler =>
+  (req, _res, next) => {
+    if (!req.user) return next(AppError.unauthorized());
+    if (!roles.includes(req.user.rol)) return next(AppError.forbidden());
+    next();
+  };

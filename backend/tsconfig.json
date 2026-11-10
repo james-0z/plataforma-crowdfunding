@@ -1,18 +1,19 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
+    "types": ["node"],
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "allowImportingTsExtensions": false
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"]
 }

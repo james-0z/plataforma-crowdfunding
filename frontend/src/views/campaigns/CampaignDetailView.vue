@@ -1,271 +1,166 @@
 <template>
-  <div class="detail-container" v-if="campana">
+  <p v-if="loading" class="empty-state">Cargando campaña…</p>
+  <div v-else-if="notFound" class="empty-state">
+    <h2>Campaña no encontrada</h2>
+    <router-link to="/campanas">Volver al catálogo</router-link>
+  </div>
+  <p v-else-if="error && !campaign" class="alert alert-error">{{ error }}</p>
+
+  <div v-else-if="campaign" class="detail-container">
     <header class="detail-header">
-      <span class="badge" :class="campana.estado">{{ campana.estado }}</span>
-      <h2>{{ campana.titulo }}</h2>
-      <p class="creator">Creado por <strong>{{ campana.creador }}</strong></p>
+      <StatusBadge :status="campaign.estado" />
+      <h2>{{ campaign.titulo }}</h2>
+      <p class="muted">
+        Creada por <strong>{{ campaign.creadorNombre }}</strong>
+        <template v-if="campaign.categoria"> · {{ campaign.categoria }}</template>
+      </p>
     </header>
 
     <div class="detail-grid">
       <div class="main-info">
-        <section class="section">
-          <h3>Descripción del Proyecto</h3>
-          <p class="description-text">{{ campana.descripcion }}</p>
+        <section class="card">
+          <h3>Descripción del proyecto</h3>
+          <p class="description-text">{{ campaign.descripcion }}</p>
         </section>
 
-        <section class="section">
-          <h3>Reglas de Financiamiento</h3>
-          <div class="rules-box">
-            <p><strong>Esquema All-or-Nothing:</strong> Esta campaña solo recibirá los fondos si alcanza el 100% de la meta antes de la fecha límite. En caso de no cumplirse, todos los aportes serán reembolsados en su totalidad.</p>
-          </div>
+        <section class="card">
+          <h3>Reglas de financiamiento</h3>
+          <p>
+            <strong>All-or-Nothing:</strong> los fondos solo se entregan si la campaña alcanza el 100&nbsp;% de su meta al
+            llegar la fecha límite. Si no la alcanza, <strong>todos los aportes se reembolsan</strong>. La campaña sigue
+            abierta hasta su fecha límite, incluso después de superar la meta.
+          </p>
         </section>
       </div>
 
-      <aside class="funding-sidebar">
-        <div class="stats-card">
-          <ProgressBar 
-            :current-amount="campana.montoRecaudado" 
-            :goal-amount="campana.metaMonto" 
-          />
+      <aside class="card funding">
+        <ProgressBar :current-amount="campaign.montoRecaudado" :goal-amount="campaign.metaMonto" />
 
-          <div class="time-info">
-            <small>📅 Fecha límite: <strong>{{ campana.fechaLimite }}</strong></small>
-          </div>
+        <ul class="stats">
+          <li><strong>{{ campaign.totalAportantes }}</strong><span>aportantes</span></li>
+          <li v-if="campaign.estado === 'activa'"><strong>{{ campaign.diasRestantes }}</strong><span>días restantes</span></li>
+        </ul>
+        <p class="muted small">📅 Fecha límite: <strong>{{ formatDate(campaign.fechaLimite) }}</strong></p>
 
-          <hr class="divider" />
+        <hr class="divider" />
 
-          <form @submit.prevent="realizarAporte" class="contribution-form">
-            <h4>Realizar un Aporte</h4>
-            <div class="form-group">
-              <label for="monto">Monto a aportar ($)</label>
-              <input 
-                type="number" 
-                id="monto" 
-                v-model.number="montoAporte" 
-                min="1" 
-                placeholder="Ej. 50" 
-                required
-              />
+        <template v-if="campaign.estado === 'exitosa'">
+          <p class="alert alert-success">🎉 Campaña exitosa: alcanzó su meta y los fondos fueron liberados.</p>
+        </template>
+        <template v-else-if="campaign.estado === 'fallida'">
+          <p class="alert alert-error">No alcanzó la meta. Todos los aportes fueron reembolsados.</p>
+        </template>
+        <template v-else>
+          <p v-if="campaign.montoRecaudado >= campaign.metaMonto" class="alert alert-success">
+            ¡Meta alcanzada! Aún puedes aportar hasta la fecha límite.
+          </p>
+
+          <p v-if="isOwner" class="alert alert-info">Esta es tu campaña: no puedes aportar a ella.</p>
+          <router-link v-else-if="!auth.isAuthenticated" :to="{ name: 'login', query: { redirect: route.fullPath } }" class="btn btn-primary btn-block">
+            Inicia sesión para aportar
+          </router-link>
+
+          <form v-else novalidate @submit.prevent="contribute">
+            <h4>Realizar un aporte</h4>
+            <div class="chips">
+              <button v-for="n in [10000, 20000, 50000, 100000]" :key="n" type="button" class="chip" @click="amount = n">{{ formatMoney(n) }}</button>
             </div>
-
-            <button 
-              type="submit" 
-              class="btn-submit" 
-              :disabled="campana.estado !== 'activa'"
-            >
-              {{ campana.estado === 'activa' ? 'Aportar a esta campaña' : 'Campaña Finalizada' }}
+            <div class="form-group">
+              <label for="monto">Monto a aportar</label>
+              <input id="monto" v-model.number="amount" type="number" min="1000" step="1000" placeholder="Ej. 50000" required />
+            </div>
+            <p v-if="error" class="alert alert-error" role="alert">{{ error }}</p>
+            <p v-if="success" class="alert alert-success" role="status">{{ success }}</p>
+            <button type="submit" class="btn btn-primary btn-block" :disabled="sending">
+              {{ sending ? 'Procesando…' : 'Aportar a esta campaña' }}
             </button>
           </form>
-
-          <p v-if="mensajeExito" class="success-message">{{ mensajeExito }}</p>
-        </div>
+        </template>
       </aside>
     </div>
-  </div>
-  <div v-else class="not-found">
-    <h2>Campaña no encontrada</h2>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
-import ProgressBar from '@/components/common/ProgressBar.vue';
-import { useCampaignStore, type Campaign } from '@/stores/campaignStore';
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { campaignsApi } from '@/api/campaigns.api'
+import { contributionsApi } from '@/api/contributions.api'
+import { ApiError, errorMessage } from '@/api/http'
+import ProgressBar from '@/components/common/ProgressBar.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import { useAuthStore } from '@/stores/authStore'
+import type { Campaign } from '@/types'
+import { formatDate, formatMoney } from '@/utils/format'
 
-const route = useRoute();
-const campaignStore = useCampaignStore();
+const route = useRoute()
+const auth = useAuthStore()
 
-const campana = ref<Campaign | undefined>(undefined);
-const montoAporte = ref<number | null>(null);
-const mensajeExito = ref<string>('');
+const campaign = ref<Campaign | null>(null)
+const loading = ref(true)
+const notFound = ref(false)
+const error = ref('')
+const success = ref('')
+const amount = ref<number | null>(null)
+const sending = ref(false)
 
-const cargarCampana = () => {
-  const id = Number(route.params.id);
-  campana.value = campaignStore.getCampaignById(id);
-};
+const isOwner = computed(() => !!auth.user && campaign.value?.creadorId === auth.user.id)
 
-onMounted(() => {
-  cargarCampana();
-});
-
-// Reactividad ante cambios de ruta (cuando navegas de una campaña a otra)
-watch(
-  () => route.params.id,
-  () => {
-    cargarCampana();
+async function load() {
+  loading.value = true
+  notFound.value = false
+  error.value = ''
+  success.value = ''
+  try {
+    campaign.value = await campaignsApi.get(Number(route.params.id))
+  } catch (e) {
+    campaign.value = null
+    if (e instanceof ApiError && e.status === 404) notFound.value = true
+    else error.value = errorMessage(e)
+  } finally {
+    loading.value = false
   }
-);
+}
 
-const realizarAporte = () => {
-  if (!montoAporte.value || montoAporte.value <= 0 || !campana.value) return;
-
-  const exito = campaignStore.makeContribution(campana.value.id, montoAporte.value);
-
-  if (exito) {
-    mensajeExito.value = `¡Gracias por tu aporte de $${montoAporte.value.toLocaleString()}!`;
-    montoAporte.value = null;
-
-    setTimeout(() => {
-      mensajeExito.value = '';
-    }, 4000);
+async function contribute() {
+  error.value = ''
+  success.value = ''
+  if (!amount.value || !Number.isInteger(amount.value) || amount.value < 1000) {
+    error.value = `Ingresa un monto en pesos enteros, de al menos ${formatMoney(1000)}.`
+    return
   }
-};
+  sending.value = true
+  try {
+    const result = await contributionsApi.create({ campanaId: campaign.value!.id, monto: amount.value })
+    campaign.value = result.campaign // el servidor es la fuente de verdad
+    success.value = `¡Gracias por tu aporte de ${formatMoney(result.contribution.monto)}!`
+    amount.value = null
+  } catch (e) {
+    error.value = errorMessage(e)
+    if (e instanceof ApiError && e.status === 409) await load().then(() => (error.value = errorMessage(e)))
+  } finally {
+    sending.value = false
+  }
+}
+
+watch(() => route.params.id, load, { immediate: true })
 </script>
+
 <style scoped>
-.detail-container {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-.detail-header {
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: 1rem;
-}
-
-.detail-header h2 {
-  font-size: 2rem;
-  color: var(--color-secondary);
-  margin: 0.5rem 0 0.25rem 0;
-}
-
-.creator {
-  color: #64748b;
-  font-size: 0.95rem;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  font-weight: bold;
-}
-.badge.activa { background-color: #dbeafe; color: #1e40af; }
-.badge.exitosa { background-color: #dcfce7; color: #166534; }
-.badge.fallida { background-color: #fee2e2; color: #991b1b; }
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 2rem;
-}
-
-@media (max-width: 768px) {
-  .detail-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.main-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-.section h3 {
-  font-size: 1.25rem;
-  margin-bottom: 0.75rem;
-  color: var(--color-secondary);
-}
-
-.description-text {
-  color: var(--color-text);
-  line-height: 1.7;
-}
-
-.rules-box {
-  background-color: #f1f5f9;
-  border-left: 4px solid var(--color-primary);
-  padding: 1rem;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  font-size: 0.9rem;
-  color: #334155;
-}
-
-.funding-sidebar {
-  display: flex;
-  flex-direction: column;
-}
-
-.stats-card {
-  background-color: var(--color-card-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.time-info {
-  color: #64748b;
-  font-size: 0.9rem;
-}
-
-.divider {
-  border: none;
-  border-top: 1px solid var(--color-border);
-}
-
-.contribution-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.contribution-form h4 {
-  font-size: 1.1rem;
-  color: var(--color-secondary);
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.form-group label {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.form-group input {
-  padding: 0.6rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 1rem;
-}
-
-.btn-submit {
-  background-color: var(--color-primary);
-  color: white;
-  border: none;
-  padding: 0.75rem;
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.btn-submit:hover:not(:disabled) {
-  background-color: var(--color-primary-hover);
-}
-
-.btn-submit:disabled {
-  background-color: #94a3b8;
-  cursor: not-allowed;
-}
-
-.success-message {
-  color: #166534;
-  background-color: #dcfce7;
-  padding: 0.75rem;
-  border-radius: var(--radius-md);
-  font-size: 0.875rem;
-  text-align: center;
-}
+.detail-header { margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.detail-header h2 { font-size: clamp(1.5rem, 3vw, 2rem); }
+.detail-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; align-items: start; }
+.main-info { display: flex; flex-direction: column; gap: 1.5rem; }
+.description-text { white-space: pre-line; margin-top: 0.75rem; }
+.card h3 { margin-bottom: 0.5rem; }
+.funding { position: sticky; top: 5rem; display: flex; flex-direction: column; gap: 1rem; }
+.stats { list-style: none; display: flex; gap: 2rem; }
+.stats li { display: flex; flex-direction: column; }
+.stats strong { font-size: 1.4rem; color: var(--color-secondary); }
+.stats span, .small { font-size: 0.85rem; }
+.divider { border: none; border-top: 1px solid var(--color-border); }
+.chips { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; }
+.chip { border: 1px solid var(--color-border); background: #fff; border-radius: 999px; padding: 0.3rem 0.8rem; cursor: pointer; font: inherit; font-size: 0.85rem; }
+.chip:hover { border-color: var(--color-primary); color: var(--color-primary); }
+@media (max-width: 860px) { .detail-grid { grid-template-columns: 1fr; } .funding { position: static; } }
 </style>

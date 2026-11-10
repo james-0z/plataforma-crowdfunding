@@ -1,0 +1,4 @@
+# Evita que los saltos de línea de Windows (CRLF) marquen todos los archivos como modificados.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

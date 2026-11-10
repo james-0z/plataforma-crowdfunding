@@ -1,22 +1,10 @@
-# Dependencias
 node_modules/
-
-# Variables de entorno y credenciales
+dist/
 .env
 .env.local
-.env.*.local
-
-# Archivos de compilación y salida
-dist/
-build/
-
-# Logs del sistema y ejecutables
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Configuraciones de editor/sistema
+coverage/
 .DS_Store
 .vscode/
 .idea/
+backend/public/

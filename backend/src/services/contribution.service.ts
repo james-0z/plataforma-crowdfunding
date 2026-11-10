@@ -1,82 +1,70 @@
-import { pool } from '../config/db.js';
-
-export interface ContributionInput {
-  campanaId: number;
-  usuarioId: number;
-  monto: number;
-}
+import { db } from '../config/db.js';
+import { AppError } from '../errors/AppError.js';
+import type { Campaign } from '../models/campaign.model.js';
+import type { Contribution, MyContribution } from '../models/contribution.model.js';
+import { todayInTz } from '../utils/dates.js';
+import { mapContribution } from '../utils/mappers.js';
+import type { CreateContributionInput } from '../validators/contribution.schema.js';
+import { campaignService } from './campaign.service.js';
 
 export const contributionService = {
-  async create(data: ContributionInput) {
-    const { campanaId, usuarioId, monto } = data;
-
-    if (monto <= 0) {
-      throw new Error('El monto del aporte debe ser mayor a cero.');
-    }
-
-    // Usar una transacción para asegurar consistencia atómica
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // 1. Verificar si la campaña existe y bloquear la fila para evitar condiciones de carrera
-      const campaignResult = await client.query(
-        'SELECT * FROM campanas WHERE id = $1 FOR UPDATE',
-        [campanaId]
+  /**
+   * Registra un aporte de forma atómica. Reglas:
+   *  - la campaña debe estar activa y no haber vencido;
+   *  - el creador no puede aportar a su propia campaña;
+   *  - el acumulado se suma en SQL (NUMERIC), nunca con floats de JavaScript.
+   * La campaña sigue abierta aunque alcance la meta: su resultado se decide al vencer
+   * (ver settlement.service). Así puede recibir aportes por encima del 100 %.
+   */
+  async create(
+    userId: number,
+    input: CreateContributionInput,
+  ): Promise<{ contribution: Contribution; campaign: Campaign }> {
+    return db.transaction(async (tx) => {
+      // Bloquea la fila: dos aportes simultáneos se serializan.
+      const locked = await tx.query(
+        `SELECT creador_id, estado, to_char(fecha_limite, 'YYYY-MM-DD') AS fecha_limite
+         FROM campanas WHERE id = $1 FOR UPDATE`,
+        [input.campanaId],
       );
+      const campaign = locked.rows[0];
 
-      if (campaignResult.rows.length === 0) {
-        throw new Error('Campaña no encontrada.');
+      if (!campaign) throw AppError.notFound('Campaña no encontrada.');
+      if (campaign.estado !== 'activa' || campaign.fecha_limite < todayInTz()) {
+        throw AppError.conflict('La campaña ya cerró y no acepta más aportes.');
+      }
+      if (campaign.creador_id === userId) {
+        throw AppError.forbidden('No puedes aportar a tu propia campaña.');
       }
 
-      const campaign = campaignResult.rows[0];
-
-      if (campaign.estado !== 'activa') {
-        throw new Error('No se puede aportar a una campaña que no está activa.');
-      }
-
-      // 2. Registrar el aporte en la tabla 'aportes'
-      const contributionQuery = `
-        INSERT INTO aportes (campana_id, usuario_id, monto)
-        VALUES ($1, $2, $3)
-        RETURNING *;
-      `;
-      const contributionResult = await client.query(contributionQuery, [campanaId, usuarioId, monto]);
-      const newContribution = contributionResult.rows[0];
-
-      // 3. Calcular el nuevo monto recaudado
-      const nuevoMontoRecaudado = Number(campaign.monto_recaudado) + Number(monto);
-      let nuevoEstado = campaign.estado;
-
-      // Regla All-or-Nothing: Si se alcanza o supera la meta, pasa a 'exitosa'
-      if (nuevoMontoRecaudado >= Number(campaign.meta_monto)) {
-        nuevoEstado = 'exitosa';
-      }
-
-      // 4. Actualizar la campaña con el nuevo monto y estado
-      const updateCampaignQuery = `
-        UPDATE campanas
-        SET monto_recaudado = $1, estado = $2
-        WHERE id = $3
-        RETURNING *;
-      `;
-      const updatedCampaignResult = await client.query(updateCampaignQuery, [
-        nuevoMontoRecaudado,
-        nuevoEstado,
-        campanaId
+      const inserted = await tx.query(
+        'INSERT INTO aportes (campana_id, usuario_id, monto) VALUES ($1, $2, $3) RETURNING *',
+        [input.campanaId, userId, input.monto],
+      );
+      await tx.query('UPDATE campanas SET monto_recaudado = monto_recaudado + $1 WHERE id = $2', [
+        input.monto,
+        input.campanaId,
       ]);
 
-      await client.query('COMMIT');
-
       return {
-        contribution: newContribution,
-        campaign: updatedCampaignResult.rows[0]
+        contribution: mapContribution(inserted.rows[0]),
+        campaign: await campaignService.findById(input.campanaId, tx),
       };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
+    });
+  },
+
+  async listByUser(userId: number): Promise<MyContribution[]> {
+    const result = await db.query(
+      `SELECT a.*, c.titulo AS campana_titulo, c.estado AS estado_campana
+       FROM aportes a JOIN campanas c ON c.id = a.campana_id
+       WHERE a.usuario_id = $1
+       ORDER BY a.fecha_aporte DESC, a.id DESC`,
+      [userId],
+    );
+    return result.rows.map((row) => ({
+      ...mapContribution(row),
+      campanaTitulo: row.campana_titulo,
+      estadoCampana: row.estado_campana,
+    }));
+  },
 };

@@ -1,115 +1,44 @@
 <template>
-  <div class="card">
-    <div class="card-body">
-      <span class="badge" :class="status">{{ status }}</span>
-      <h3>{{ title }}</h3>
-      <p class="description">{{ description }}</p>
-      
-      <div class="progress-section">
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: percentage + '%' }"></div>
-        </div>
-        <div class="stats">
-          <span><strong>${{ currentAmount }}</strong> recaudados</span>
-          <span><strong>{{ percentage }}%</strong></span>
-        </div>
-      </div>
-      
-      <div class="card-footer">
-        <small>Meta: ${{ goalAmount }}</small>
-        <router-link :to="`/campanas/${id}`" class="btn-detail"> Ver más</router-link>
-      </div>
+  <article class="card campaign-card">
+    <div class="top">
+      <StatusBadge :status="campaign.estado" />
+      <span v-if="campaign.categoria" class="category">{{ campaign.categoria }}</span>
     </div>
-  </div>
+    <h3>{{ campaign.titulo }}</h3>
+    <p class="creator">por {{ campaign.creadorNombre }}</p>
+    <p class="description">{{ campaign.descripcion }}</p>
+
+    <ProgressBar :current-amount="campaign.montoRecaudado" :goal-amount="campaign.metaMonto" />
+
+    <div class="footer">
+      <small class="muted">
+        <template v-if="campaign.estado === 'activa'">{{ daysLabel(campaign.diasRestantes) }}</template>
+        <template v-else>Cerró el {{ formatDate(campaign.fechaLimite) }}</template>
+      </small>
+      <router-link :to="{ name: 'campaign-detail', params: { id: campaign.id } }" class="btn btn-outline btn-sm">Ver más</router-link>
+    </div>
+  </article>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import ProgressBar from '@/components/common/ProgressBar.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
+import type { Campaign } from '@/types'
+import { daysLabel, formatDate } from '@/utils/format'
 
-const props = defineProps<{
-  id: number;
-  title: string;
-  description: string;
-  currentAmount: number;
-  goalAmount: number;
-  status: 'activa' | 'exitosa' | 'fallida';
-}>();
-
-const percentage = computed(() => {
-  const calc = Math.round((props.currentAmount / props.goalAmount) * 100);
-  return calc > 100 ? 100 : calc;
-});
+defineProps<{ campaign: Campaign }>()
 </script>
 
 <style scoped>
-.card {
-  background-color: var(--color-card-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  font-weight: bold;
-  margin-bottom: 0.5rem;
-  width: fit-content;
-}
-
-.badge.activa { background-color: #dbeafe; color: #1e40af; }
-.badge.exitosa { background-color: #dcfce7; color: #166534; }
-.badge.fallida { background-color: #fee2e2; color: #991b1b; }
-
+.campaign-card { display: flex; flex-direction: column; gap: 0.6rem; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.category { font-size: 0.78rem; color: var(--color-muted); }
+h3 { font-size: 1.1rem; }
+.creator { font-size: 0.82rem; color: var(--color-muted); }
 .description {
-  color: #64748b;
-  font-size: 0.9rem;
-  margin: 0.5rem 0 1rem 0;
+  color: var(--color-muted); font-size: 0.9rem; flex: 1;
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
-
-.progress-bar {
-  height: 8px;
-  background-color: var(--color-border);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background-color: var(--color-primary);
-  transition: width 0.3s ease;
-}
-
-.stats {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.85rem;
-  margin-top: 0.5rem;
-}
-
-.card-footer {
-  margin-top: 1.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.btn-detail {
-  background-color: transparent;
-  border: 1px solid var(--color-primary);
-  color: var(--color-primary);
-  padding: 0.4rem 0.8rem;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-}
-
-.btn-detail:hover {
-  background-color: var(--color-primary);
-  color: white;
-}
+.footer { display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; }
+.btn-sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
 </style>

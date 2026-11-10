@@ -1,114 +1,68 @@
 <template>
-  <div class="home-container">
+  <div>
     <section class="hero">
-      <h2>Financia proyectos con el modelo All-or-Nothing</h2>
+      <h1>Financia proyectos con el modelo All-or-Nothing</h1>
       <p>
-        Apoya proyectos innovadores. Si la campaña alcanza su meta antes de la fecha límite, el proyecto se financia. De lo contrario, se reembolsan los aportes.
+        Apoya ideas que te inspiran. Si la campaña alcanza su meta antes de la fecha límite, el proyecto se
+        financia. Si no, <strong>todos los aportes se reembolsan</strong>.
       </p>
-      <router-link to="/campanas" class="btn-primary">Explorar Campañas</router-link>
+      <div class="hero-actions">
+        <router-link to="/campanas" class="btn btn-primary">Explorar campañas</router-link>
+        <router-link :to="auth.isAuthenticated ? '/dashboard/crear-campana' : '/auth/registro'" class="btn btn-outline">
+          Lanzar mi proyecto
+        </router-link>
+      </div>
     </section>
 
-    <section class="featured-section">
-      <h3>Campañas Destacadas</h3>
-      <div class="campaigns-grid">
-        <CampaignCard
-          v-for="campana in campanasEjemplo"
-          :key="campana.id"
-          :id="campana.id"
-          :title="campana.titulo"
-          :description="campana.descripcion"
-          :current-amount="campana.montoRecaudado"
-          :goal-amount="campana.metaMonto"
-          :status="campana.estado"
-        />
+    <section class="how">
+      <div class="card"><h3>1 · Aporta</h3><p class="muted">Elige un proyecto y aporta el monto que quieras.</p></div>
+      <div class="card"><h3>2 · Espera el cierre</h3><p class="muted">La campaña corre hasta su fecha límite.</p></div>
+      <div class="card"><h3>3 · Todo o nada</h3><p class="muted">Meta lograda: se financia. Si no: reembolso total.</p></div>
+    </section>
+
+    <section>
+      <div class="header-actions">
+        <h2>Campañas destacadas</h2>
+        <router-link to="/campanas">Ver todas →</router-link>
+      </div>
+      <p v-if="loading" class="empty-state">Cargando campañas…</p>
+      <p v-else-if="error" class="alert alert-error">{{ error }}</p>
+      <p v-else-if="campaigns.length === 0" class="empty-state">Aún no hay campañas activas. ¡Sé el primero en crear una!</p>
+      <div v-else class="campaigns-grid">
+        <CampaignCard v-for="c in campaigns" :key="c.id" :campaign="c" />
       </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import CampaignCard from '@/components/common/CampaignCard.vue';
+import { onMounted, ref } from 'vue'
+import { campaignsApi } from '@/api/campaigns.api'
+import { errorMessage } from '@/api/http'
+import CampaignCard from '@/components/common/CampaignCard.vue'
+import { useAuthStore } from '@/stores/authStore'
+import type { Campaign } from '@/types'
 
-interface Campana {
-  id: number;
-  titulo: string;
-  descripcion: string;
-  montoRecaudado: number;
-  metaMonto: number;
-  estado: 'activa' | 'exitosa' | 'fallida';
-}
+const auth = useAuthStore()
+const campaigns = ref<Campaign[]>([])
+const loading = ref(true)
+const error = ref('')
 
-const campanasEjemplo = ref<Campana[]>([
-  {
-    id: 1,
-    titulo: 'Videojuego Indie RPG 2D',
-    descripcion: 'Un juego de rol con arte píxel y banda sonora orquestal.',
-    montoRecaudado: 3500,
-    metaMonto: 5000,
-    estado: 'activa'
-  },
-  {
-    id: 2,
-    titulo: 'Teclado Mecánico Ergonómico',
-    descripcion: 'Diseño ultra compacto impreso en 3D con switches personalizados.',
-    montoRecaudado: 12000,
-    metaMonto: 10000,
-    estado: 'exitosa'
+onMounted(async () => {
+  try {
+    campaigns.value = (await campaignsApi.list({ estado: 'activa', pageSize: 3 })).items
+  } catch (e) {
+    error.value = errorMessage(e)
+  } finally {
+    loading.value = false
   }
-]);
+})
 </script>
 
 <style scoped>
-.home-container {
-  display: flex;
-  flex-direction: column;
-  gap: 3rem;
-}
-
-.hero {
-  text-align: center;
-  padding: 3rem 1rem;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border-radius: var(--radius-md);
-}
-
-.hero h2 {
-  font-size: 2.2rem;
-  color: var(--color-secondary);
-  margin-bottom: 1rem;
-}
-
-.hero p {
-  font-size: 1.1rem;
-  max-width: 650px;
-  margin: 0 auto 1.5rem auto;
-  color: #475569;
-}
-
-.btn-primary {
-  display: inline-block;
-  background-color: var(--color-primary);
-  color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  font-weight: 600;
-  transition: background-color 0.2s ease;
-}
-
-.btn-primary:hover {
-  background-color: var(--color-primary-hover);
-}
-
-.featured-section h3 {
-  font-size: 1.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.campaigns-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
-}
+.hero { text-align: center; padding: 3rem 1rem; max-width: 760px; margin: 0 auto; }
+.hero h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); margin-bottom: 1rem; }
+.hero p { color: var(--color-muted); font-size: 1.1rem; }
+.hero-actions { display: flex; gap: 1rem; justify-content: center; margin-top: 1.75rem; flex-wrap: wrap; }
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin: 1rem 0 3rem; }
 </style>

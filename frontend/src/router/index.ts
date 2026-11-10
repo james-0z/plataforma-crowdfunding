@@ -1,56 +1,72 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/authStore'
 
-// Layouts
-import MainLayout from '@/layouts/MainLayout.vue';
-import DashboardLayout from '@/layouts/DashboardLayout.vue';
-import AuthLayout from '@/layouts/AuthLayout.vue';
+declare module 'vue-router' {
+  interface RouteMeta {
+    requiresAuth?: boolean
+    requiresAdmin?: boolean
+    guestOnly?: boolean
+    title?: string
+  }
+}
 
-// Vistas públicas
-import HomeView from '@/views/HomeView.vue';
-import CampaignListView from '@/views/campaigns/CampaignListView.vue';
-import CampaignDetailView from '@/views/campaigns/CampaignDetailView.vue';
-import CreateCampaignView from '@/views/campaigns/CreateCampaignView.vue';
-
-// Vistas Dashboard
-import MyCampaignsView from '@/views/dashboard/MyCampaignsView.vue';
-import MyContributionsView from '@/views/dashboard/MyContributionsView.vue';
-
-// Vistas Auth
-import LoginView from '@/views/auth/LoginView.vue';
-import RegisterView from '@/views/auth/RegisterView.vue';
-
-const routes: Array<RouteRecordRaw> = [
+const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    component: MainLayout,
+    component: () => import('@/layouts/MainLayout.vue'),
     children: [
-      { path: '', name: 'Home', component: HomeView },
-      { path: 'campanas', name: 'CampaignList', component: CampaignListView },
-      { path: 'campanas/:id', name: 'CampaignDetail', component: CampaignDetailView }
-    ]
+      { path: '', name: 'home', component: () => import('@/views/HomeView.vue'), meta: { title: 'Inicio' } },
+      { path: 'campanas', name: 'campaigns', component: () => import('@/views/campaigns/CampaignListView.vue'), meta: { title: 'Campañas' } },
+      { path: 'campanas/:id(\\d+)', name: 'campaign-detail', component: () => import('@/views/campaigns/CampaignDetailView.vue'), meta: { title: 'Campaña' } },
+    ],
   },
   {
     path: '/auth',
-    component: AuthLayout,
+    component: () => import('@/layouts/AuthLayout.vue'),
+    meta: { guestOnly: true },
     children: [
-      { path: 'login', name: 'Login', component: LoginView },
-      { path: 'registro', name: 'Register', component: RegisterView }
-    ]
+      { path: 'login', name: 'login', component: () => import('@/views/auth/LoginView.vue'), meta: { title: 'Iniciar sesión' } },
+      { path: 'registro', name: 'register', component: () => import('@/views/auth/RegisterView.vue'), meta: { title: 'Crear cuenta' } },
+    ],
   },
   {
     path: '/dashboard',
-    component: DashboardLayout,
+    component: () => import('@/layouts/DashboardLayout.vue'),
+    meta: { requiresAuth: true },
+    redirect: { name: 'my-campaigns' },
     children: [
-      { path: 'mis-campanas', name: 'MyCampaigns', component: MyCampaignsView },
-      { path: 'mis-aportes', name: 'MyContributions', component: MyContributionsView },
-      { path: 'crear-campana', name: 'CreateCampaign', component: CreateCampaignView }
-    ]
-  }
-];
+      { path: 'mis-campanas', name: 'my-campaigns', component: () => import('@/views/dashboard/MyCampaignsView.vue'), meta: { title: 'Mis campañas' } },
+      { path: 'mis-aportes', name: 'my-contributions', component: () => import('@/views/dashboard/MyContributionsView.vue'), meta: { title: 'Mis aportes' } },
+      { path: 'crear-campana', name: 'create-campaign', component: () => import('@/views/campaigns/CreateCampaignView.vue'), meta: { title: 'Nueva campaña' } },
+      { path: 'admin', name: 'admin', component: () => import('@/views/dashboard/AdminView.vue'), meta: { requiresAdmin: true, title: 'Administración' } },
+    ],
+  },
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue'), meta: { title: 'No encontrada' } },
+]
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
-});
+  routes,
+  scrollBehavior: () => ({ top: 0 }),
+})
 
-export default router;
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  await auth.init() // recupera la sesión (refresh token) antes de decidir
+
+  if (to.meta.requiresAuth && !auth.isAuthenticated) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { name: 'my-campaigns' }
+  }
+  if (to.meta.guestOnly && auth.isAuthenticated) {
+    return { name: 'my-campaigns' }
+  }
+})
+
+router.afterEach((to) => {
+  document.title = to.meta.title ? `${to.meta.title} · CrowdFund` : 'CrowdFund'
+})
+
+export default router

@@ -1,60 +1,74 @@
-import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import { authApi, type SessionResponse } from '@/api/auth.api'
+import { setAccessToken, setRefreshHandler } from '@/api/http'
+import type { User } from '@/types'
 
-export interface User {
-  id: number;
-  nombre: string;
-  email: string;
-  rol: 'user' | 'admin';
-}
-
+/**
+ * Sesión: el access token vive solo en memoria (no en localStorage, a salvo de XSS persistente);
+ * el refresh token va en una cookie HttpOnly que JavaScript no puede leer.
+ * Al recargar la página, init() recupera la sesión pidiendo un access token nuevo.
+ */
 export const useAuthStore = defineStore('auth', () => {
-  // Estado inicial recuperado del almacenamiento local
-  const token = ref<string | null>(localStorage.getItem('jwt_token'));
-  const user = ref<User | null>(
-    localStorage.getItem('auth_user') 
-      ? JSON.parse(localStorage.getItem('auth_user') as string) 
-      : null
-  );
+  const user = ref<User | null>(null)
+  const ready = ref(false)
 
-  const isAuthenticated = computed(() => !!token.value);
+  const isAuthenticated = computed(() => user.value !== null)
+  const isAdmin = computed(() => user.value?.rol === 'admin')
 
-  const setAuth = (newToken: string, newUser: User) => {
-    token.value = newToken;
-    user.value = newUser;
-    localStorage.setItem('jwt_token', newToken);
-    localStorage.setItem('auth_user', JSON.stringify(newUser));
-  };
+  function applySession(session: SessionResponse) {
+    setAccessToken(session.accessToken)
+    user.value = session.user
+  }
 
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Simulación de autenticación (posteriormente se reemplazará por llamada HTTP)
-    if (email && password) {
-      const mockUser: User = {
-        id: 1,
-        nombre: 'James Ordoñez',
-        email: email,
-        rol: 'user'
-      };
-      const mockToken = 'mocked_jwt_token_123456';
-      setAuth(mockToken, mockUser);
-      return true;
+  function clearSession() {
+    setAccessToken(null)
+    user.value = null
+  }
+
+  // Una sola renovación a la vez aunque fallen varias peticiones en paralelo.
+  let refreshing: Promise<boolean> | null = null
+  function refreshSession(): Promise<boolean> {
+    refreshing ??= authApi
+      .refresh()
+      .then((session) => {
+        applySession(session)
+        return true
+      })
+      .catch(() => {
+        clearSession()
+        return false
+      })
+      .finally(() => {
+        refreshing = null
+      })
+    return refreshing
+  }
+  setRefreshHandler(refreshSession)
+
+  let initPromise: Promise<void> | null = null
+  function init(): Promise<void> {
+    initPromise ??= refreshSession().then(() => {
+      ready.value = true
+    })
+    return initPromise
+  }
+
+  async function login(email: string, password: string) {
+    applySession(await authApi.login({ email, password }))
+  }
+
+  async function register(nombre: string, email: string, password: string) {
+    applySession(await authApi.register({ nombre, email, password }))
+  }
+
+  async function logout() {
+    try {
+      await authApi.logout()
+    } finally {
+      clearSession()
     }
-    return false;
-  };
+  }
 
-  const logout = () => {
-    token.value = null;
-    user.value = null;
-    localStorage.removeItem('jwt_token');
-    localStorage.removeItem('auth_user');
-  };
-
-  return {
-    token,
-    user,
-    isAuthenticated,
-    login,
-    logout,
-    setAuth
-  };
-});
+  return { user, ready, isAuthenticated, isAdmin, init, login, register, logout }
+})

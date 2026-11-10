@@ -1,260 +1,95 @@
 <template>
-  <div class="create-campaign-container">
+  <div class="create-campaign">
     <header class="page-header">
-      <h2>Crear Nueva Campaña</h2>
-      <p class="subtitle">
-        Define la meta financiera y la fecha de cierre bajo el modelo <strong>All-or-Nothing</strong>.
-      </p>
+      <h2>Crear nueva campaña</h2>
+      <p class="subtitle">Define la meta y la fecha de cierre bajo el modelo <strong>All-or-Nothing</strong>.</p>
     </header>
 
-    <form @submit.prevent="guardarCampana" class="form-card">
-      <!-- Título de la Campaña -->
+    <form class="card" novalidate @submit.prevent="submit">
+      <p v-if="error" class="alert alert-error" role="alert">{{ error }}</p>
+
       <div class="form-group">
-        <label for="titulo">Título de la Campaña *</label>
-        <input 
-          type="text" 
-          id="titulo" 
-          v-model="form.titulo" 
-          placeholder="Ej. Teclado Mecánico Ergonómico Custom" 
-          required 
-        />
+        <label for="titulo">Título *</label>
+        <input id="titulo" v-model.trim="form.titulo" type="text" maxlength="150" placeholder="Ej. Teclado mecánico ergonómico" required />
       </div>
 
-      <!-- Descripción -->
       <div class="form-group">
-        <label for="descripcion">Descripción del Proyecto *</label>
-        <textarea 
-          id="descripcion" 
-          v-model="form.descripcion" 
-          rows="5" 
-          placeholder="Describe la propuesta, objetivos y en qué usarás los fondos recaudados..." 
-          required
-        ></textarea>
+        <label for="descripcion">Descripción *</label>
+        <textarea id="descripcion" v-model.trim="form.descripcion" rows="6" maxlength="5000" placeholder="Describe el proyecto, tus objetivos y en qué usarás los fondos…" required></textarea>
+        <small class="hint">{{ form.descripcion.length }} / 5000 (mínimo 20 caracteres)</small>
       </div>
 
-      <!-- Fila doble: Meta ($) y Fecha Límite -->
       <div class="form-row">
         <div class="form-group">
-          <label for="metaMonto">Meta de Recaudación ($ USD) *</label>
-          <input 
-            type="number" 
-            id="metaMonto" 
-            v-model.number="form.metaMonto" 
-            min="10" 
-            step="10" 
-            placeholder="Ej. 5000" 
-            required 
-          />
-          <small class="hint">Si no alcanzas el 100% de esta meta, los fondos se devuelven.</small>
+          <label for="meta">Meta de recaudación *</label>
+          <input id="meta" v-model.number="form.metaMonto" type="number" min="50000" step="1000" placeholder="Ej. 5000000" required />
+          <small class="hint">Si no alcanzas el 100&nbsp;% al cierre, los aportes se devuelven.</small>
         </div>
-
         <div class="form-group">
-          <label for="fechaLimite">Fecha de Cierre (Límite) *</label>
-          <input 
-            type="date" 
-            id="fechaLimite" 
-            v-model="form.fechaLimite" 
-            :min="fechaMinima" 
-            required 
-          />
+          <label for="fecha">Fecha límite *</label>
+          <input id="fecha" v-model="form.fechaLimite" type="date" :min="minDate" :max="maxDate" required />
+          <small class="hint">Entre mañana y 60 días.</small>
         </div>
       </div>
 
-      <!-- Categoría -->
       <div class="form-group">
         <label for="categoria">Categoría *</label>
-        <select id="categoria" v-model="form.categoria" required>
-          <option value="" disabled>Selecciona una categoría</option>
-          <option value="tecnologia">Tecnología</option>
-          <option value="videojuegos">Videojuegos</option>
-          <option value="arte">Arte & Cine</option>
-          <option value="diseno">Diseño & Hardware</option>
+        <select id="categoria" v-model.number="form.categoriaId" required>
+          <option :value="0" disabled>Selecciona una categoría</option>
+          <option v-for="c in categories.categories" :key="c.id" :value="c.id">{{ c.nombre }}</option>
         </select>
       </div>
 
-      <!-- Mensajes de Estado -->
-      <div v-if="mensajeExito" class="alert success">
-        {{ mensajeExito }}
-      </div>
-
-      <!-- Botones de Acción -->
       <div class="form-actions">
-        <router-link to="/dashboard/mis-campanas" class="btn-cancel">
-          Cancelar
-        </router-link>
-        <button type="submit" class="btn-submit" :disabled="enviando">
-          {{ enviando ? 'Publicando...' : 'Publicar Campaña' }}
-        </button>
+        <router-link to="/dashboard/mis-campanas" class="btn btn-ghost">Cancelar</router-link>
+        <button type="submit" class="btn btn-primary" :disabled="sending">{{ sending ? 'Publicando…' : 'Publicar campaña' }}</button>
       </div>
     </form>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { campaignsApi } from '@/api/campaigns.api'
+import { errorMessage } from '@/api/http'
+import { useCategoryStore } from '@/stores/categoryStore'
+import { formatMoney, todayLocal } from '@/utils/format'
 
-interface FormCampana {
-  titulo: string;
-  descripcion: string;
-  metaMonto: number | null;
-  fechaLimite: string;
-  categoria: string;
+const router = useRouter()
+const categories = useCategoryStore()
+
+// Fechas en hora LOCAL (con toISOString quedaban desfasadas por la zona horaria).
+const minDate = todayLocal(1)
+const maxDate = todayLocal(60)
+
+const form = reactive({ titulo: '', descripcion: '', metaMonto: null as number | null, fechaLimite: '', categoriaId: 0 })
+const sending = ref(false)
+const error = ref('')
+
+onMounted(() => categories.load())
+
+async function submit() {
+  error.value = ''
+  if (form.titulo.length < 5) return void (error.value = 'El título debe tener al menos 5 caracteres.')
+  if (form.descripcion.length < 20) return void (error.value = 'La descripción debe tener al menos 20 caracteres.')
+  if (!form.metaMonto || !Number.isInteger(form.metaMonto) || form.metaMonto < 50000) return void (error.value = `La meta mínima es ${formatMoney(50000)}.`)
+  if (!form.fechaLimite) return void (error.value = 'Elige la fecha límite.')
+  if (!form.categoriaId) return void (error.value = 'Selecciona una categoría.')
+
+  sending.value = true
+  try {
+    const { campaign } = await campaignsApi.create({ ...form, metaMonto: form.metaMonto })
+    await router.push({ name: 'campaign-detail', params: { id: campaign.id } })
+  } catch (e) {
+    error.value = errorMessage(e)
+  } finally {
+    sending.value = false
+  }
 }
-
-const router = useRouter();
-
-const form = ref<FormCampana>({
-  titulo: '',
-  descripcion: '',
-  metaMonto: null,
-  fechaLimite: '',
-  categoria: ''
-});
-
-const enviando = ref<boolean>(false);
-const mensajeExito = ref<string>('');
-
-// Restricción: La fecha mínima de cierre es a partir de mañana
-const fechaMinima = computed(() => {
-  const manana = new Date();
-  manana.setDate(manana.getDate() + 1);
-  return manana.toISOString().split('T')[0];
-});
-
-const guardarCampana = async () => {
-  if (!form.value.titulo || !form.value.metaMonto || !form.value.fechaLimite) return;
-
-  enviando.value = true;
-
-  // Simulación de respuesta de API
-  setTimeout(() => {
-    enviando.value = false;
-    mensajeExito.value = '¡Campaña creada exitosamente!';
-
-    setTimeout(() => {
-      router.push('/dashboard/mis-campanas');
-    }, 1500);
-  }, 1000);
-};
 </script>
 
 <style scoped>
-.create-campaign-container {
-  max-width: 800px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.page-header h2 {
-  font-size: 1.8rem;
-  color: var(--color-secondary);
-}
-
-.subtitle {
-  color: #64748b;
-  font-size: 0.95rem;
-  margin-top: 0.25rem;
-}
-
-.form-card {
-  background-color: var(--color-card-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-}
-
-@media (max-width: 640px) {
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-label {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-input, textarea, select {
-  padding: 0.65rem 0.8rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: 0.95rem;
-  font-family: inherit;
-  background-color: #fff;
-  transition: border-color 0.2s;
-}
-
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: var(--color-primary);
-}
-
-.hint {
-  font-size: 0.75rem;
-  color: #64748b;
-}
-
-.alert.success {
-  background-color: #dcfce7;
-  color: #166534;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.btn-cancel {
-  padding: 0.65rem 1.25rem;
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  font-weight: 500;
-  text-align: center;
-}
-
-.btn-submit {
-  background-color: var(--color-primary);
-  color: white;
-  border: none;
-  padding: 0.65rem 1.25rem;
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.btn-submit:hover:not(:disabled) {
-  background-color: var(--color-primary-hover);
-}
-
-.btn-submit:disabled {
-  background-color: #94a3b8;
-  cursor: not-allowed;
-}
+.create-campaign { max-width: 760px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
 </style>
